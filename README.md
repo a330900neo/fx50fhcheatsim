@@ -123,7 +123,7 @@ open, `AC` or `ON` to leave.
 The whole OS paints on a dark gradient with a teal accent; formula lines
 are blue and final answers sit in a green panel.
 
-**TriangleFind** — solve any triangle and show the working the way you'd
+**TriFind** — solve any triangle and show the working the way you'd
 write it in an exam.
 
 Fill in any three of: sides `a` `b` `c`, angles `A` `B` `C`, and the area.
@@ -150,6 +150,13 @@ Pick **Solve everything** to get every remaining value plus a summary.
 
 Three angles with no side is reported as underdetermined, which it is —
 that fixes the shape but not the size.
+
+**AI** — ask questions about maths, chemistry, physics, ICT, or general
+science. Use the **AI settings** button below the calculator to select
+Google Gemini's free tier or an OpenRouter free model and store its key in
+the website's local storage. The key is not part of calculator state. Inside
+the AI app, use **left** for camera capture and OCR, **Shift + Alpha** for
+English text input, and **EXE** to send the question.
 
 ### Adding an app
 

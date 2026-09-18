@@ -44,6 +44,22 @@
            display:inline-flex; align-items:center; gap:6px; }
   .dl-btn:hover{ background:#34383f; }
   .dl-btn:active{ transform:scale(0.97); }
+  .settings-btn{ font-size:13px; padding:9px 16px; border-radius:10px; background:#176b68;
+                 color:#f2fffd; border:1px solid #2b9b93; cursor:pointer; }
+  .settings-btn:hover{ background:#21847f; }
+  .settings-backdrop{ display:none; position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.68);
+                     align-items:center; justify-content:center; padding:18px; }
+  .settings-backdrop.open{ display:flex; }
+  .settings-panel{ width:min(420px,100%); background:#20242a; color:#eef1f4; border:1px solid #4b535e;
+                   border-radius:12px; padding:20px; box-shadow:0 18px 60px rgba(0,0,0,.45); }
+  .settings-panel h2{ margin:0 0 8px; font-size:19px; }
+  .settings-panel p{ margin:0 0 16px; color:#aeb5bd; font-size:13px; line-height:1.45; }
+  .settings-panel label{ display:block; margin:12px 0 5px; color:#cdd3da; font-size:12px; }
+  .settings-panel input,.settings-panel select{ width:100%; padding:9px 10px; color:#f3f5f7; background:#15181c;
+                                                  border:1px solid #4a515a; border-radius:6px; }
+  .settings-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+  .settings-actions button{ padding:8px 13px; border-radius:7px; border:1px solid #4a515a; cursor:pointer; }
+  #saveSettings{ background:#4ad6c6; color:#102321; border-color:#4ad6c6; }
   .morse{ display:flex; gap:5px; align-items:center; height:14px; }
   .morse i{ display:block; background:#6f7681; border-radius:2px; height:6px; }
   .morse i.dot{ width:6px; } .morse i.dash{ width:16px; }
@@ -126,6 +142,7 @@
   <div class="toolbar">
     <a class="dl-btn" id="dlHtml" href="#">⬇ index.html</a>
     <a class="dl-btn" id="dlOs" href="#">⬇ os.js</a>
+    <button class="settings-btn" id="settingsOpen" type="button">AI settings</button>
   </div>
 
   <div class="hint">
@@ -135,6 +152,24 @@
     hold ~0.4s for dashes. That boots <b>os.js</b>, which lights the screen in colour.
     <b>ON</b> closes it instantly.
   </div>
+</div>
+
+<div class="settings-backdrop" id="settingsBackdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <form class="settings-panel" id="settingsForm">
+    <h2 id="settingsTitle">AI website settings</h2>
+    <p>Keys stay in this browser's website storage. They are not saved in calculator memory.</p>
+    <label for="aiProvider">Provider</label>
+    <select id="aiProvider">
+      <option value="gemini">Google Gemini (free tier)</option>
+      <option value="openrouter">OpenRouter (free models)</option>
+    </select>
+    <label for="aiKey">API key</label>
+    <input id="aiKey" type="password" autocomplete="off" placeholder="Paste your provider key">
+    <div class="settings-actions">
+      <button type="button" id="settingsClose">Cancel</button>
+      <button type="submit" id="saveSettings">Save settings</button>
+    </div>
+  </form>
 </div>
 
 <!-- Guest OS. When you host this on GitHub these two files sit side by side. -->
@@ -880,6 +915,9 @@
 })();
 </script>
 
+<!-- Prefer the editable external OS when it is available; the inline copy remains a fallback. -->
+<script src="os.js"></script>
+
 <script>
 (function(){
 'use strict';
@@ -1164,6 +1202,92 @@ function powerOnOrReset(){
    ===================================================================== */
 var guestOS = null, osActive = false;
 
+var AI_SETTINGS_KEY = 'fx50fh-ai-settings';
+function readAISettings(){
+  try { return JSON.parse(localStorage.getItem(AI_SETTINGS_KEY) || '{}'); }
+  catch(e){ return {}; }
+}
+function loadScript(src, done){
+  if(window.Tesseract) return done();
+  var script = document.createElement('script');
+  script.src = src;
+  script.onload = done;
+  script.onerror = function(){ done(new Error('OCR library could not load')); };
+  document.head.appendChild(script);
+}
+function openCamera(done){
+  var input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+  input.onchange = function(){
+    var file = input.files && input.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){ done(reader.result); };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+function runOCR(dataUrl, done){
+  loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', function(err){
+    if(err) return done('', err.message);
+    Tesseract.recognize(dataUrl, 'eng').then(function(result){
+      done(result.data.text, null);
+    }).catch(function(error){ done('', 'OCR failed: ' + error.message); });
+  });
+}
+function askAI(prompt, done){
+  var settings = readAISettings(), key = settings.key;
+  if(!key) return done('', 'Set an API key in website settings');
+  var system = 'You are a concise school tutor. Answer questions in maths, chemistry, physics, ICT, and general science. Show essential working and state units. Plain text only.';
+  var url, body, headers = { 'Content-Type':'application/json', 'Authorization':'Bearer ' + key };
+  if((settings.provider || 'gemini') === 'openrouter'){
+    url = 'https://openrouter.ai/api/v1/chat/completions';
+    body = { model:'meta-llama/llama-3.2-3b-instruct:free', messages:[
+      {role:'system', content:system}, {role:'user', content:prompt}
+    ]};
+  } else {
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + encodeURIComponent(key);
+    delete headers.Authorization;
+    body = { systemInstruction:{parts:[{text:system}]}, contents:[{parts:[{text:prompt}]}] };
+  }
+  fetch(url, {method:'POST', headers:headers, body:JSON.stringify(body)}).then(function(res){
+    return res.json().then(function(data){ return {ok:res.ok, data:data}; });
+  }).then(function(result){
+    if(!result.ok) throw new Error((result.data.error && result.data.error.message) || 'AI request failed');
+    var data = result.data, answer = '';
+    if((settings.provider || 'gemini') === 'openrouter') answer = data.choices && data.choices[0] && data.choices[0].message.content;
+    else answer = data.candidates && data.candidates[0] && data.candidates[0].content.parts[0].text;
+    done(answer || '', answer ? null : 'AI returned no answer');
+  }).catch(function(error){ done('', error.message); });
+}
+function openTextInput(initial, done){
+  var value = window.prompt('English input for AI', initial || '');
+  if(value !== null) done(value);
+}
+
+var settingsBackdrop = document.getElementById('settingsBackdrop');
+var settingsForm = document.getElementById('settingsForm');
+function showSettings(){
+  var settings = readAISettings();
+  document.getElementById('aiProvider').value = settings.provider || 'gemini';
+  document.getElementById('aiKey').value = settings.key || '';
+  settingsBackdrop.classList.add('open');
+  document.getElementById('aiKey').focus();
+}
+document.getElementById('settingsOpen').addEventListener('click', showSettings);
+document.getElementById('settingsClose').addEventListener('click', function(){ settingsBackdrop.classList.remove('open'); });
+settingsForm.addEventListener('submit', function(e){
+  e.preventDefault();
+  localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify({
+    provider: document.getElementById('aiProvider').value,
+    key: document.getElementById('aiKey').value.trim()
+  }));
+  settingsBackdrop.classList.remove('open');
+});
+settingsBackdrop.addEventListener('click', function(e){
+  if(e.target === settingsBackdrop) settingsBackdrop.classList.remove('open');
+});
+
 var OS_API = {
   get screen(){
     return { ctx: ctx, width: CW, height: CH, colors: COLORS };
@@ -1172,6 +1296,7 @@ var OS_API = {
   battery: battery,
   signal: signal,
   now: function(){ return new Date(); },
+  web: { openCamera: openCamera, ocr: runOCR, ask: askAI, openTextInput: openTextInput },
   exit: function(){ stopOS(); }
 };
 
