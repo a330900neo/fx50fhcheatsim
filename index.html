@@ -1215,17 +1215,47 @@ function loadScript(src, done){
   script.onerror = function(){ done(new Error('OCR library could not load')); };
   document.head.appendChild(script);
 }
-function openCamera(done){
-  var input = document.createElement('input');
-  input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
-  input.onchange = function(){
-    var file = input.files && input.files[0];
-    if(!file) return;
-    var reader = new FileReader();
-    reader.onload = function(){ done(reader.result); };
-    reader.readAsDataURL(file);
-  };
-  input.click();
+var cameraVideo = null, cameraStream = null, cameraDone = null, cameraTimer = null;
+function cameraStart(done){
+  cameraDone = done;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    cameraDone(null, 'Camera needs HTTPS or localhost'); cameraDone = null; return;
+  }
+  cameraVideo = document.createElement('video');
+  cameraVideo.autoplay = true; cameraVideo.playsInline = true; cameraVideo.muted = true;
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}, audio:false}).then(function(stream){
+    cameraStream = stream;
+    cameraVideo.srcObject = stream;
+    cameraTimer = setInterval(invalidate, 100);
+    invalidate();
+  }).catch(function(error){
+    cameraDone(null, 'Camera permission denied'); cameraDone = null; cameraVideo = null;
+    invalidate();
+  });
+}
+function cameraRender(target, width, height){
+  target.fillStyle = '#050708'; target.fillRect(0, 0, width, height);
+  if(!cameraVideo || cameraVideo.readyState < 2) {
+    target.fillStyle = '#e9eef7'; target.font = '16px monospace'; target.fillText('Waiting for camera...', 18, 70); return;
+  }
+  var vw = cameraVideo.videoWidth, vh = cameraVideo.videoHeight;
+  var scale = Math.max(width / vw, height / vh), dw = vw * scale, dh = vh * scale;
+  target.drawImage(cameraVideo, (width - dw) / 2, (height - dh) / 2, dw, dh);
+  target.strokeStyle = '#4ad6c6'; target.lineWidth = 2;
+  target.strokeRect(28, 48, width - 56, height - 88);
+}
+function cameraCapture(){
+  if(!cameraVideo || cameraVideo.readyState < 2 || !cameraDone) return;
+  var shot = document.createElement('canvas');
+  shot.width = cameraVideo.videoWidth; shot.height = cameraVideo.videoHeight;
+  shot.getContext('2d').drawImage(cameraVideo, 0, 0);
+  var done = cameraDone; cameraStop(); done(shot.toDataURL('image/jpeg', 0.88));
+}
+function cameraStop(){
+  if(cameraTimer) clearInterval(cameraTimer);
+  cameraTimer = null;
+  if(cameraStream) cameraStream.getTracks().forEach(function(track){ track.stop(); });
+  cameraStream = null; cameraVideo = null; cameraDone = null;
 }
 function runOCR(dataUrl, done){
   loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', function(err){
@@ -1246,7 +1276,7 @@ function askAI(prompt, done){
       {role:'system', content:system}, {role:'user', content:prompt}
     ]};
   } else {
-    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + encodeURIComponent(key);
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(key);
     delete headers.Authorization;
     body = { systemInstruction:{parts:[{text:system}]}, contents:[{parts:[{text:prompt}]}] };
   }
@@ -1260,11 +1290,6 @@ function askAI(prompt, done){
     done(answer || '', answer ? null : 'AI returned no answer');
   }).catch(function(error){ done('', error.message); });
 }
-function openTextInput(initial, done){
-  var value = window.prompt('English input for AI', initial || '');
-  if(value !== null) done(value);
-}
-
 var settingsBackdrop = document.getElementById('settingsBackdrop');
 var settingsForm = document.getElementById('settingsForm');
 function showSettings(){
@@ -1296,7 +1321,8 @@ var OS_API = {
   battery: battery,
   signal: signal,
   now: function(){ return new Date(); },
-  web: { openCamera: openCamera, ocr: runOCR, ask: askAI, openTextInput: openTextInput },
+  web: { cameraStart: cameraStart, cameraRender: cameraRender, cameraCapture: cameraCapture,
+    cameraStop: cameraStop, ocr: runOCR, ask: askAI },
   exit: function(){ stopOS(); }
 };
 
@@ -1325,6 +1351,7 @@ function startOS(){
   invalidate();
 }
 function stopOS(){
+  cameraStop();
   if(guestOS && guestOS.shutdown){ try{ guestOS.shutdown(); }catch(e){} }
   osActive = false;
   canvas.classList.remove('lit');

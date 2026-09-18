@@ -654,29 +654,81 @@
       this.answer = '';
       this.status = 'Shift + Alpha = English input';
       this.busy = false;
+      this.inputMode = false;
+      this.inputText = '';
+      this.inputKey = '';
+      this.inputIndex = 0;
+      this.cameraMode = false;
     },
     key: function (e) {
       if (e.type !== 'press') return;
+      if (this.cameraMode) {
+        if (e.key === 'exe') return api.web.cameraCapture();
+        if (e.key === 'ac') return this.closeCamera();
+        return;
+      }
       if (e.key === 'ac') return OS.goHome();
       if (e.key === 'alpha' && e.shift) {
-        var self = this;
-        return api.web.openTextInput(this.prompt, function (value) {
-          self.prompt = value || '';
-          self.answer = '';
-          self.status = 'EXE = ask AI    camera = OCR';
-          api.invalidate();
-        });
+        this.inputMode = true;
+        this.inputText = this.prompt;
+        this.inputKey = '';
+        this.inputIndex = 0;
+        this.status = '2-9 = letters   EXE = accept';
+        return api.invalidate();
       }
+      if (this.inputMode) return this.keyInput(e.key);
       if (e.key === 'exe') return this.ask();
-      if (e.key === 'left') return api.web.openCamera(this.receiveImage.bind(this));
+      if (e.key === 'left') {
+        this.cameraMode = true;
+        this.status = 'Camera preview   EXE = capture';
+        api.web.cameraStart(this.receiveImage.bind(this));
+        return api.invalidate();
+      }
       if (e.key === 'del') this.prompt = this.prompt.slice(0, -1);
       else if (/^[0-9]$/.test(e.key)) this.prompt += e.key;
       else if (e.key === 'dot') this.prompt += '.';
       api.invalidate();
     },
-    receiveImage: function (dataUrl) {
+    keyInput: function (k) {
+      var groups = { '2': 'abc', '3': 'def', '4': 'ghi', '5': 'jkl',
+        '6': 'mno', '7': 'pqrs', '8': 'tuv', '9': 'wxyz' };
+      if (groups[k]) {
+        if (this.inputKey === k) this.inputIndex = (this.inputIndex + 1) % groups[k].length;
+        else { this.inputKey = k; this.inputIndex = 0; }
+      } else if (k === 'exe') {
+        if (this.inputKey) this.inputText += groups[this.inputKey][this.inputIndex];
+        this.inputKey = '';
+      } else if (k === 'dot') {
+        if (this.inputKey) this.inputText += groups[this.inputKey][this.inputIndex];
+        this.inputText += ' '; this.inputKey = '';
+      } else if (k === 'del') {
+        if (this.inputKey) this.inputKey = '';
+        else this.inputText = this.inputText.slice(0, -1);
+      } else if (k === 'ac') {
+        this.inputMode = false; this.inputKey = '';
+      }
+      this.prompt = this.inputText + (this.inputKey ? groups[this.inputKey][this.inputIndex] : '');
+      this.status = '2-9 letters   dot=space   EXE=accept';
+      api.invalidate();
+    },
+    closeCamera: function () {
+      this.cameraMode = false;
+      api.web.cameraStop();
+      this.status = 'EXE = ask AI    Shift + Alpha = edit';
+      api.invalidate();
+    },
+    receiveImage: function (dataUrl, error) {
       var self = this;
+      if (error) {
+        this.cameraMode = false;
+        this.status = error;
+        api.web.cameraStop();
+        api.invalidate();
+        return;
+      }
       this.busy = true;
+      this.cameraMode = false;
+      api.web.cameraStop();
       this.status = 'Reading camera image...';
       api.invalidate();
       api.web.ocr(dataUrl, function (textValue, error) {
@@ -703,6 +755,12 @@
       });
     },
     render: function (ctx) {
+      if (this.cameraMode) {
+        api.web.cameraRender(ctx, W, H);
+        text(ctx, 'Camera', 12, BAR_H + 6, 17, T.accent2, 'bold');
+        text(ctx, 'EXE capture   AC back', 12, H - 18, 12, T.text);
+        return;
+      }
       text(ctx, 'AI', 12, BAR_H + 6, 17, T.accent2, 'bold');
       text(ctx, 'maths  chem  phy  ICT', 48, BAR_H + 8, 12, T.dim);
       ctx.fillStyle = T.panel;
