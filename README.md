@@ -16,7 +16,14 @@ dependencies.
 
 ## The calculator
 
-Two-line display, like the real thing:
+It starts **off**, like the real thing. Press **ON** to wake it.
+
+Pressing **ON** again at any point resets the machine to a clean state —
+input, answer, memory and the modifier latches all cleared. If the OS is
+running, **ON** closes it instantly and drops you back to a fresh
+calculator.
+
+Two-line display:
 
 ```
  12+34          <- top line, what you are entering
@@ -25,8 +32,8 @@ Two-line display, like the real thing:
 
 Trig works in **degrees**, so `sin(30)` gives `0.5`.
 
-`MODE` (a short tap) opens the built-in mode menu: Calculator, Snake,
-Guess the number.
+`MODE` (a short tap) opens a placeholder mode screen. The real machine has
+one calculation mode and that's all this shows; `AC` returns.
 
 A physical keyboard works too: digits, `+ - * / ^ ( ) .`, `Enter` = EXE,
 `Backspace` = DEL, `Esc` = AC, arrow keys, `m` = MODE, `s` = SHIFT.
@@ -44,7 +51,12 @@ Tap **SOS in morse on the MODE key** to boot `os.js`:
 Short tap = dot. Hold for about 0.4s = dash. The row of pips under the
 calculator shows how far along you are. A 2.5 second pause resets it.
 
-Press `AC` on the OS homescreen to drop back into the calculator.
+The screen switches to **colour** while the OS runs, and the frame picks up
+a backlight glow — the monochrome LCD palette belongs to the calculator
+firmware only.
+
+Press `AC` on the OS homescreen, or `ON` from anywhere, to drop back into
+the calculator.
 
 ---
 
@@ -69,7 +81,7 @@ window.CASIO_OS = {
 
 | call | gives you |
 |---|---|
-| `api.screen` | `{ ctx, width, height, colors:{bg,fg,mid,dim} }` |
+| `api.screen` | `{ ctx, width, height, colors:{bg,fg,mid,dim} }` — the mono LCD palette; ignore it and paint in colour if you prefer, as the demo does |
 | `api.invalidate()` | request a repaint |
 | `api.exit()` | shut down, hand the LCD back |
 | `api.battery()` | `0.0`–`1.0` |
@@ -104,8 +116,12 @@ stop();                      // unsubscribe
 
 ## The demo OS
 
-**Homescreen** — clock, signal bars, battery gauge, app tiles.
-`◀ ▶` to select, `EXE` to open, `AC` to leave.
+**Homescreen** — clock, signal bars, a battery gauge that turns amber then
+red as it drains, and app tiles with icon chips. `◀ ▶` to select, `EXE` to
+open, `AC` or `ON` to leave.
+
+The whole OS paints on a dark gradient with a teal accent; formula lines
+are blue and final answers sit in a green panel.
 
 **TriangleFind** — solve any triangle and show the working the way you'd
 write it in an exam.

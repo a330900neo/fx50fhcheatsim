@@ -34,6 +34,36 @@
   var OS = { name: 'CasioOS', version: '0.3' };
 
   var api = null, SC = null, W = 0, H = 0, COL = null;
+
+  /* -----------------------------------------------------------------
+     The LCD is monochrome only while the calculator firmware owns it.
+     Once the OS boots, the backlight comes on and we get colour.
+     ----------------------------------------------------------------- */
+  var T = {
+    bg0:     '#0e1526',
+    bg1:     '#182238',
+    panel:   'rgba(255,255,255,0.055)',
+    panelHi: 'rgba(255,255,255,0.10)',
+    line:    'rgba(255,255,255,0.14)',
+    text:    '#e9eef7',
+    dim:     'rgba(233,238,247,0.58)',
+    faint:   'rgba(233,238,247,0.30)',
+    accent:  '#4ad6c6',
+    accent2: '#ffb454',
+    formula: '#9ecbff',
+    answer:  '#7ee7a8',
+    good:    '#5ddb8a',
+    warn:    '#ffcc55',
+    bad:     '#ff6b6b'
+  };
+
+  function paintBackground(ctx) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, T.bg1);
+    g.addColorStop(1, T.bg0);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
   var clockTimer = null;
   var view = 'home';      // 'home' | 'app'
   var homeIndex = 0;
@@ -81,35 +111,34 @@
   var BAR_H = 26;
 
   function drawStatusBar(ctx) {
-    ctx.fillStyle = COL.fg;
-    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = T.panel;
     ctx.fillRect(0, 0, W, BAR_H);
-    ctx.globalAlpha = 1;
+    ctx.fillStyle = T.line;
+    ctx.fillRect(0, BAR_H - 1, W, 1);
 
     var d = api.now();
     var hh = ('0' + d.getHours()).slice(-2), mm = ('0' + d.getMinutes()).slice(-2);
-    text(ctx, hh + ':' + mm, 10, 5, 16, COL.mid, 'bold');
-    text(ctx, OS.name, W / 2, 5, 15, COL.dim, '', 'center');
+    text(ctx, hh + ':' + mm, 10, 5, 16, T.accent, 'bold');
+    text(ctx, OS.name, W / 2, 6, 14, T.dim, '', 'center');
 
     // signal bars
-    var sig = api.signal(), sx = W - 96;
+    var sig = api.signal(), sx = W - 100;
     for (var i = 0; i < 4; i++) {
       var bh = 5 + i * 4;
-      ctx.fillStyle = COL.fg;
-      ctx.globalAlpha = i < sig ? 1 : 0.22;
-      ctx.fillRect(sx + i * 7, BAR_H - 6 - bh, 5, bh);
+      ctx.fillStyle = i < sig ? T.accent : T.faint;
+      ctx.fillRect(sx + i * 7, BAR_H - 7 - bh, 5, bh);
     }
-    ctx.globalAlpha = 1;
 
-    // battery
-    var lvl = api.battery(), bx = W - 56, by = 6, bw = 38, bh2 = 14;
-    ctx.strokeStyle = COL.fg; ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.7;
-    ctx.strokeRect(bx, by, bw, bh2);
-    ctx.fillRect(bx + bw + 1, by + 4, 3, 6);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = COL.fg;
-    ctx.fillRect(bx + 2.5, by + 2.5, Math.max(1, (bw - 5) * lvl), bh2 - 5);
+    // battery, coloured by level
+    var lvl = api.battery(), bx = W - 58, by = 6, bw = 38, bh2 = 14;
+    var col = lvl > 0.5 ? T.good : (lvl > 0.2 ? T.warn : T.bad);
+    ctx.strokeStyle = T.faint; ctx.lineWidth = 1.5;
+    roundRect(ctx, bx, by, bw, bh2, 3); ctx.stroke();
+    ctx.fillStyle = T.faint;
+    ctx.fillRect(bx + bw + 2, by + 4, 3, 6);
+    ctx.fillStyle = col;
+    roundRect(ctx, bx + 2.5, by + 2.5, Math.max(2, (bw - 5) * lvl), bh2 - 5, 1.5);
+    ctx.fill();
   }
 
   /* ---------------------------------------------------------------
@@ -493,66 +522,63 @@
     },
 
     renderInput: function (ctx) {
-      text(ctx, 'TriangleFind \u2014 enter what you know', 10, BAR_H + 4, 14, COL.dim);
-      var top = BAR_H + 22, rowH = 24, colX = 10, boxX = 108, boxW = 118;
+      text(ctx, 'TriangleFind', 12, BAR_H + 6, 16, T.accent2, 'bold');
+      text(ctx, 'enter what you know', 130, BAR_H + 8, 13, T.dim);
+      var top = BAR_H + 28, rowH = 24, boxX = 104, boxW = 120;
       for (var i = 0; i < FIELDS.length; i++) {
-        var f = FIELDS[i], y = top + i * rowH;
-        var sel = i === this.cursor;
+        var f = FIELDS[i], y = top + i * rowH, sel = i === this.cursor;
         if (sel) {
-          ctx.fillStyle = COL.fg; ctx.globalAlpha = 0.14;
-          roundRect(ctx, 6, y - 2, 232, rowH - 2, 4); ctx.fill();
-          ctx.globalAlpha = 1;
+          ctx.fillStyle = T.panelHi;
+          roundRect(ctx, 6, y - 2, 240, rowH - 3, 5); ctx.fill();
+          ctx.fillStyle = T.accent;
+          roundRect(ctx, 6, y - 2, 3, rowH - 3, 1.5); ctx.fill();
         }
-        text(ctx, (sel ? '\u25B8' : ' ') + f.label, colX, y + 2, 16, sel ? COL.fg : COL.mid, sel ? 'bold' : '');
-        ctx.strokeStyle = COL.fg; ctx.globalAlpha = sel ? 0.75 : 0.28; ctx.lineWidth = 1;
-        roundRect(ctx, boxX, y, boxW, rowH - 5, 3); ctx.stroke();
-        ctx.globalAlpha = 1;
+        text(ctx, f.label, 16, y + 2, 15, sel ? T.text : T.dim, sel ? 'bold' : '');
+        ctx.strokeStyle = sel ? T.accent : T.line; ctx.lineWidth = 1;
+        roundRect(ctx, boxX, y, boxW, rowH - 5, 4); ctx.stroke();
         var val = this.buf[f.id];
-        var show = val + (sel ? '_' : '');
-        text(ctx, show || (sel ? '_' : '\u2013'), boxX + 6, y + 2, 16,
-          val ? COL.fg : COL.dim, val ? 'bold' : '');
-        if (f.unit) text(ctx, f.unit, boxX + boxW + 5, y + 2, 15, COL.dim);
+        var show = val + (sel ? '|' : '');
+        text(ctx, show || '\u2013', boxX + 7, y + 2, 15,
+          val ? T.accent2 : T.faint, val ? 'bold' : '');
+        if (f.unit) text(ctx, f.unit, boxX + boxW + 5, y + 2, 14, T.faint);
       }
-
-      // triangle sketch on the right
-      this.sketch(ctx, 262, BAR_H + 16, W - 274, H - BAR_H - 44);
-
-      var msg = this.flash || 'EXE = choose what to find   AC = home';
-      text(ctx, msg, 10, H - 20, 14, this.flash ? COL.fg : COL.dim, this.flash ? 'bold' : '');
+      this.sketch(ctx, 262, BAR_H + 18, W - 276, H - BAR_H - 48);
+      var msg = this.flash || 'EXE = choose what to find    AC = home';
+      text(ctx, msg, 12, H - 20, 13, this.flash ? T.warn : T.faint, this.flash ? 'bold' : '');
     },
 
     sketch: function (ctx, x, y, w, h) {
-      var P = { A: [x + w * 0.16, y + h * 0.88],
-                B: [x + w * 0.90, y + h * 0.88],
-                C: [x + w * 0.56, y + h * 0.12] };
-      ctx.strokeStyle = COL.fg; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;
+      var P = { A: [x + w * 0.16, y + h * 0.86],
+                B: [x + w * 0.92, y + h * 0.86],
+                C: [x + w * 0.56, y + h * 0.10] };
       ctx.beginPath();
       ctx.moveTo(P.A[0], P.A[1]); ctx.lineTo(P.B[0], P.B[1]);
-      ctx.lineTo(P.C[0], P.C[1]); ctx.closePath(); ctx.stroke();
-      ctx.globalAlpha = 1;
-      text(ctx, 'A', P.A[0] - 14, P.A[1] - 4, 14, COL.mid, 'bold');
-      text(ctx, 'B', P.B[0] + 4, P.B[1] - 4, 14, COL.mid, 'bold');
-      text(ctx, 'C', P.C[0] - 4, P.C[1] - 18, 14, COL.mid, 'bold');
-      text(ctx, 'c', (P.A[0] + P.B[0]) / 2 - 4, P.A[1] + 4, 13, COL.dim);
-      text(ctx, 'a', (P.B[0] + P.C[0]) / 2 + 4, (P.B[1] + P.C[1]) / 2 - 8, 13, COL.dim);
-      text(ctx, 'b', (P.A[0] + P.C[0]) / 2 - 14, (P.A[1] + P.C[1]) / 2 - 8, 13, COL.dim);
+      ctx.lineTo(P.C[0], P.C[1]); ctx.closePath();
+      ctx.fillStyle = 'rgba(74,214,198,0.10)'; ctx.fill();
+      ctx.strokeStyle = T.accent; ctx.lineWidth = 2; ctx.stroke();
+      text(ctx, 'A', P.A[0] - 15, P.A[1] - 3, 13, T.accent2, 'bold');
+      text(ctx, 'B', P.B[0] + 5, P.B[1] - 3, 13, T.accent2, 'bold');
+      text(ctx, 'C', P.C[0] - 4, P.C[1] - 17, 13, T.accent2, 'bold');
+      text(ctx, 'c', (P.A[0] + P.B[0]) / 2 - 4, P.A[1] + 3, 12, T.dim);
+      text(ctx, 'a', (P.B[0] + P.C[0]) / 2 + 5, (P.B[1] + P.C[1]) / 2 - 8, 12, T.dim);
+      text(ctx, 'b', (P.A[0] + P.C[0]) / 2 - 14, (P.A[1] + P.C[1]) / 2 - 8, 12, T.dim);
     },
 
     renderTarget: function (ctx) {
-      text(ctx, 'What do you want to find?', 10, BAR_H + 4, 15, COL.dim);
-      var top = BAR_H + 26, rowH = 26;
+      text(ctx, 'What do you want to find?', 12, BAR_H + 6, 15, T.accent2, 'bold');
+      var top = BAR_H + 30, rowH = 26;
       var start = Math.max(0, Math.min(this.tIndex - 3, this.targets.length - 6));
       for (var i = start; i < Math.min(this.targets.length, start + 6); i++) {
         var y = top + (i - start) * rowH, sel = i === this.tIndex;
         var id = this.targets[i];
         var name = id === 'ALL' ? 'Solve everything' : LABEL_OF[id];
         if (sel) {
-          ctx.fillStyle = COL.fg;
-          roundRect(ctx, 8, y - 3, W - 16, rowH - 3, 5); ctx.fill();
+          ctx.fillStyle = T.accent;
+          roundRect(ctx, 10, y - 4, W - 20, rowH - 3, 6); ctx.fill();
         }
-        text(ctx, name, 20, y, 17, sel ? COL.bg : COL.fg, sel ? 'bold' : '');
+        text(ctx, name, 24, y, 16, sel ? T.bg0 : T.text, sel ? 'bold' : '');
       }
-      text(ctx, 'EXE = solve   AC = back', 10, H - 20, 14, COL.dim);
+      text(ctx, 'EXE = solve    AC = back', 12, H - 20, 13, T.faint);
     },
 
     renderResult: function (ctx) {
@@ -561,26 +587,28 @@
       for (var i = this.scroll; i < end; i++) {
         var L = this.result[i], y = top + (i - this.scroll) * rowH;
         if (L.t === 'sp') continue;
-        if (L.t === 'h') text(ctx, L.s, 12, y, 15, COL.mid, 'bold');
-        else if (L.t === 'a') {
-          ctx.fillStyle = COL.fg; ctx.globalAlpha = 0.12;
-          roundRect(ctx, 8, y - 2, W - 60, rowH - 2, 3); ctx.fill(); ctx.globalAlpha = 1;
-          text(ctx, L.s, 12, y, 15, COL.fg, 'bold');
+        if (L.t === 'h') {
+          ctx.fillStyle = T.accent2;
+          roundRect(ctx, 10, y + 2, 3, rowH - 6, 1.5); ctx.fill();
+          text(ctx, L.s, 20, y, 14, T.accent2, 'bold');
+        } else if (L.t === 'a') {
+          ctx.fillStyle = 'rgba(126,231,168,0.14)';
+          roundRect(ctx, 10, y - 2, W - 56, rowH - 1, 4); ctx.fill();
+          text(ctx, L.s, 18, y, 14, T.answer, 'bold');
+        } else {
+          text(ctx, L.s, 24, y, 13, T.formula);
         }
-        else text(ctx, L.s, 22, y, 14, COL.fg);
       }
-      // scrollbar
       if (this.result.length > vis) {
         var trackH = H - top - 26;
-        ctx.fillStyle = COL.fg; ctx.globalAlpha = 0.15;
-        roundRect(ctx, W - 12, top, 5, trackH, 2.5); ctx.fill();
-        ctx.globalAlpha = 0.6;
-        var kh = Math.max(16, trackH * vis / this.result.length);
+        ctx.fillStyle = T.line;
+        roundRect(ctx, W - 13, top, 5, trackH, 2.5); ctx.fill();
+        ctx.fillStyle = T.accent;
+        var kh = Math.max(18, trackH * vis / this.result.length);
         var ky = top + (trackH - kh) * (this.scroll / Math.max(1, this.result.length - vis));
-        roundRect(ctx, W - 12, ky, 5, kh, 2.5); ctx.fill();
-        ctx.globalAlpha = 1;
+        roundRect(ctx, W - 13, ky, 5, kh, 2.5); ctx.fill();
       }
-      text(ctx, '\u25B2\u25BC scroll   AC = back   EXE = new', 12, H - 18, 13, COL.dim);
+      text(ctx, '\u25B2\u25BC scroll   AC = back   EXE = new', 12, H - 18, 12, T.faint);
     }
   };
 
@@ -595,22 +623,22 @@
     enter: function () { this.scroll = 0; },
     key: function (e) { if (e.type === 'press' && e.key === 'ac') OS.goHome(); },
     render: function (ctx) {
+      text(ctx, OS.name + ' v' + OS.version, 14, BAR_H + 10, 18, T.accent, 'bold');
       var lines = [
-        OS.name + ' v' + OS.version,
-        '',
         'Loaded from os.js as a guest OS.',
         'It controls only the LCD and reads',
-        'the key stream — nothing else.',
+        'the key stream \u2014 nothing else.',
         '',
-        'Host: fx-50FH II web replica',
-        'Screen: ' + W + ' x ' + H + ' px',
-        'Unlock: SOS in morse on MODE'
+        'Host:    fx-50FH II web replica',
+        'Screen:  ' + W + ' x ' + H + ' px, colour',
+        'Unlock:  SOS in morse on MODE',
+        'Exit:    ON, or AC from home'
       ];
       for (var i = 0; i < lines.length; i++) {
-        text(ctx, lines[i], 14, BAR_H + 8 + i * 20, i === 0 ? 17 : 14,
-          i === 0 ? COL.fg : COL.mid, i === 0 ? 'bold' : '');
+        text(ctx, lines[i], 14, BAR_H + 38 + i * 19, 13,
+          i < 3 ? T.dim : T.formula);
       }
-      text(ctx, 'AC = home', 14, H - 20, 13, COL.dim);
+      text(ctx, 'AC = home', 14, H - 20, 12, T.faint);
     }
   };
 
@@ -620,33 +648,34 @@
      Homescreen
      --------------------------------------------------------------- */
   function renderHome(ctx) {
-    var tileW = 150, tileH = 78, gap = 16;
+    var tileW = 160, tileH = 84, gap = 18;
     var totalW = APPS.length * tileW + (APPS.length - 1) * gap;
-    var x0 = (W - totalW) / 2, y0 = BAR_H + 40;
+    var x0 = (W - totalW) / 2, y0 = BAR_H + 44;
 
-    text(ctx, 'Home', 14, BAR_H + 10, 15, COL.dim);
+    text(ctx, 'Home', 14, BAR_H + 12, 14, T.dim);
 
     for (var i = 0; i < APPS.length; i++) {
       var app = APPS[i], x = x0 + i * (tileW + gap), sel = i === homeIndex;
-      ctx.lineWidth = sel ? 2.5 : 1.2;
-      ctx.strokeStyle = COL.fg;
-      ctx.globalAlpha = sel ? 1 : 0.35;
-      roundRect(ctx, x, y0, tileW, tileH, 8);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      if (sel) {
-        ctx.fillStyle = COL.fg; ctx.globalAlpha = 0.10;
-        roundRect(ctx, x, y0, tileW, tileH, 8); ctx.fill(); ctx.globalAlpha = 1;
-      }
-      text(ctx, app.icon, x + 12, y0 + 12, 26, COL.fg, 'bold');
-      text(ctx, app.title, x + 46, y0 + 16, 17, COL.fg, sel ? 'bold' : '');
+
+      ctx.fillStyle = sel ? T.panelHi : T.panel;
+      roundRect(ctx, x, y0, tileW, tileH, 10); ctx.fill();
+      ctx.strokeStyle = sel ? T.accent : T.line;
+      ctx.lineWidth = sel ? 2 : 1;
+      roundRect(ctx, x, y0, tileW, tileH, 10); ctx.stroke();
+
+      // icon chip
+      ctx.fillStyle = sel ? T.accent : T.faint;
+      roundRect(ctx, x + 12, y0 + 12, 30, 30, 7); ctx.fill();
+      text(ctx, app.icon, x + 20, y0 + 16, 20, T.bg0, 'bold');
+
+      text(ctx, app.title, x + 50, y0 + 17, 16, sel ? T.text : T.dim, 'bold');
       var blurb = wrapText(ctx, app.blurb, tileW - 24, 12);
       for (var b = 0; b < Math.min(2, blurb.length); b++) {
-        text(ctx, blurb[b], x + 12, y0 + 46 + b * 14, 12, COL.dim);
+        text(ctx, blurb[b], x + 12, y0 + 50 + b * 14, 12, T.faint);
       }
     }
-    text(ctx, '\u25C0\u25B6 select   EXE = open   AC = back to calculator',
-      W / 2, H - 22, 13, COL.dim, '', 'center');
+    text(ctx, '\u25C0\u25B6 select    EXE = open    AC or ON = calculator',
+      W / 2, H - 22, 12, T.faint, '', 'center');
   }
 
   /* ---------------------------------------------------------------
@@ -696,6 +725,7 @@
 
   OS.render = function (ctx, w, h) {
     W = w; H = h;
+    paintBackground(ctx);
     drawStatusBar(ctx);
     if (view === 'app' && activeApp) activeApp.render(ctx);
     else renderHome(ctx);
