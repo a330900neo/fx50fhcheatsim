@@ -156,10 +156,10 @@ science. Use the **AI settings** button below the calculator to select
 Google Gemini's free tier or an OpenRouter free model and store its key in
 the website's local storage. The key is not part of calculator state. Inside
 the AI app, use **left** for a live camera preview, **EXE** to capture and OCR,
-**AC** to leave the preview, and **Shift + Alpha** for the calculator-style
-T9 English input. In text input, keys **2-9** cycle letters, **dot** inserts a
-space, **DEL** removes a character, and **EXE** accepts a letter. Use **EXE**
-again to send the question.
+**AC** to leave the preview, and **Shift + Alpha** for the LCD English
+keyboard. Use the arrow keys to move over letters, **EXE** to insert the
+highlighted letter, **SHIFT** for capitals, **dot** for a space, and **AC** to
+finish input. Use **EXE** again to send the question.
 
 Camera access requires the page to be served from `localhost` or HTTPS;
 browsers do not grant camera permissions to ordinary `file://` pages.

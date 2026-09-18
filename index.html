@@ -64,6 +64,32 @@
   .morse i{ display:block; background:#6f7681; border-radius:2px; height:6px; }
   .morse i.dot{ width:6px; } .morse i.dash{ width:16px; }
   .morse i.on{ background:#ffcf6b; }
+  #camFeed{ position:fixed; left:-9999px; width:8px; height:8px; opacity:0; pointer-events:none; }
+  .vkb{
+    display:none; position:absolute; left:33.2%; top:35.6%; width:34.6%; height:58.8%;
+    z-index:6; padding:6px; border-radius:10px;
+    background:rgba(12,16,24,0.94); border:1px solid #3d8f86;
+    box-shadow:0 10px 28px rgba(0,0,0,.45); flex-direction:column; gap:4px;
+  }
+  .vkb.open{ display:flex; }
+  /* English input is rendered by the guest OS on the LCD. */
+  #vkb.open{ display:none; }
+  .vkb-hint{ color:#9fe9de; font-size:10px; text-align:center; letter-spacing:.02em; flex:0 0 auto; }
+  .vkb-keys{ flex:1; display:flex; flex-direction:column; gap:3px; min-height:0; }
+  .vkb-row{ display:flex; gap:3px; flex:1; }
+  .vkb-row button{
+    flex:1; border:0; border-radius:5px; background:#2a3344; color:#eef3fb;
+    font:600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor:pointer; min-width:0; padding:0;
+  }
+  .vkb-row button:active, .vkb-row button.down{ background:#4ad6c6; color:#102321; }
+  .vkb-row button.wide{ flex:1.6; }
+  .vkb-row button.space{ flex:3.2; }
+  .vkb-row button.accent{ background:#176b68; color:#f2fffd; }
+  @media (min-width: 720px){
+    .vkb-row button{ font-size:13px; }
+    .vkb-hint{ font-size:11px; }
+  }
 </style>
 </head>
 <body>
@@ -131,7 +157,13 @@
     <button class="btn" data-key="exp" style="left:47.25%; top:86.70%; width:5.67%; height:4.60%;"></button>
     <button class="btn" data-key="ans" style="left:53.71%; top:86.65%; width:5.58%; height:4.70%;"></button>
     <button class="btn" data-key="exe" style="left:60.00%; top:86.45%; width:5.67%; height:4.70%;"></button>
+
+    <div class="vkb" id="vkb" aria-hidden="true">
+      <div class="vkb-hint">English keyboard — Shift+Alpha to toggle</div>
+      <div class="vkb-keys" id="vkbKeys"></div>
+    </div>
   </div>
+  <video id="camFeed" playsinline webkit-playsinline muted autoplay></video>
 
   <div class="morse" id="morseTrack" title="SOS progress on MODE">
     <i class="dot"></i><i class="dot"></i><i class="dot"></i>
@@ -147,6 +179,7 @@
 
   <div class="hint">
     Press <b>ON</b> to switch it on. Top line is your input, bottom line is the answer.
+    Press <b>SHIFT+ALPHA</b> (together or one after the other) for the English keyboard.
     Pressing <b>ON</b> again resets to a clean state at any time.
     <br>Tap out <b>SOS</b> in morse on <b>MODE</b> — <code>· · · — — — · · ·</code> — short taps for dots,
     hold ~0.4s for dashes. That boots <b>os.js</b>, which lights the screen in colour.
@@ -206,6 +239,7 @@
    ===================================================================== */
 (function () {
   'use strict';
+  if (window.CASIO_OS && !window.__OS_EXTERNAL_FAILED) return;
 
   var OS = { name: 'CasioOS', version: '0.3' };
 
@@ -953,6 +987,16 @@ function signal(){
 
 /* ---- modifier latches ---- */
 var shiftOn=false, alphaOn=false, hypOn=false;
+var lastShiftAlpha = 0;
+function isShiftAlphaCombo(ev){
+  if(!ev || ev.type !== 'press') return false;
+  var hit = (ev.key === 'alpha' && ev.shift) || (ev.key === 'shift' && ev.alpha);
+  if(!hit) return false;
+  var now = Date.now();
+  if(now - lastShiftAlpha < 450) return false;
+  lastShiftAlpha = now;
+  return true;
+}
 
 /* ---- power ---- */
 var powered = false;
@@ -1095,8 +1139,8 @@ var placeholderOpen = false;
         case 'rparen': return put(')');
         case 'comma': case 'dms': return put(',');
         case 'neg': return put('-');
+        case 'exp': return put(e.shift ? '\u03C0' : 'EXP');
         case 'ans': return put('Ans');
-        case 'exp': return put('EXP');
         case 'sqrt': return put('\u221A(');
         case 'x2': return putAfterAns('\u00B2');
         case 'xcube': return putAfterAns('\u00B3');
@@ -1117,9 +1161,20 @@ var placeholderOpen = false;
           try{ var vv = Function('"use strict";'+HELPERS+'return ('+toJS(input||String(ans))+')')();
                if(isFinite(vv)) memory += vv; }catch(err){}
           return invalidate();
-        case 'alpha': if(e.shift){ put('\u03C0'); shiftOn=false; } return;
+        case 'alpha':
+          if(isShiftAlphaCombo(e)) return toggleCalcEnglish();
+          return;
+        case 'shift':
+          if(isShiftAlphaCombo(e)) return toggleCalcEnglish();
+          return;
         case 'left': case 'right': case 'up': case 'down': return;
       }
+    },
+    getText: function(){ return input; },
+    setText: function(t){
+      input = String(t == null ? '' : t);
+      freshStart = false;
+      invalidate();
     },
     render: function(ctx,w,h){
       // status row
@@ -1189,6 +1244,7 @@ function drawPlaceholder(ctx,w,h){
 /* Power on, or reset an already-on machine to a clean state. */
 function powerOnOrReset(){
   if(osActive) stopOS();          // ON always drops out of the OS at once
+  else closeKeyboard();
   placeholderOpen = false;
   MODES.calc.reset();
   powered = true;
@@ -1215,52 +1271,254 @@ function loadScript(src, done){
   script.onerror = function(){ done(new Error('OCR library could not load')); };
   document.head.appendChild(script);
 }
-var cameraVideo = null, cameraStream = null, cameraDone = null, cameraTimer = null;
+var cameraVideo = document.getElementById('camFeed');
+var cameraStream = null, cameraDone = null, cameraTimer = null;
+function cameraErrorMessage(error){
+  if(!error) return 'Camera unavailable';
+  if(error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError')
+    return 'Camera permission denied';
+  if(error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError')
+    return 'No camera found';
+  if(error.name === 'NotReadableError' || error.name === 'TrackStartError')
+    return 'Camera is busy in another app';
+  if(location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1')
+    return 'Camera needs HTTPS or localhost';
+  return 'Camera unavailable';
+}
+function stopCameraTracks(){
+  if(cameraStream) cameraStream.getTracks().forEach(function(track){ track.stop(); });
+  cameraStream = null;
+}
+function attachCameraStream(stream){
+  if(!cameraVideo){
+    cameraVideo = document.getElementById('camFeed');
+  }
+  if(!cameraVideo){
+    cameraVideo = document.createElement('video');
+    cameraVideo.setAttribute('playsinline', 'true');
+    cameraVideo.muted = true;
+    cameraVideo.autoplay = true;
+    document.body.appendChild(cameraVideo);
+  }
+  cameraStream = stream;
+  cameraVideo.setAttribute('playsinline', 'true');
+  cameraVideo.setAttribute('webkit-playsinline', 'true');
+  cameraVideo.muted = true;
+  cameraVideo.autoplay = true;
+  cameraVideo.srcObject = stream;
+  var play = function(){
+    var p = cameraVideo.play();
+    if(p && p.catch) p.catch(function(){});
+    invalidate();
+  };
+  cameraVideo.onloadedmetadata = play;
+  cameraVideo.oncanplay = play;
+  play();
+  if(cameraTimer) clearInterval(cameraTimer);
+  cameraTimer = setInterval(invalidate, 80);
+  invalidate();
+}
+function requestCamera(done){
+  var attempts = [
+    {video:{facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720}}, audio:false},
+    {video:{facingMode:'user'}, audio:false},
+    {video:true, audio:false}
+  ];
+  function next(i){
+    if(i >= attempts.length){
+      done(null);
+      return;
+    }
+    navigator.mediaDevices.getUserMedia(attempts[i]).then(function(stream){
+      done(stream);
+    }).catch(function(err){
+      if(i === attempts.length - 1) done(null, err);
+      else next(i + 1);
+    });
+  }
+  next(0);
+}
 function cameraStart(done){
+  cameraStop();
   cameraDone = done;
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    cameraDone(null, 'Camera needs HTTPS or localhost'); cameraDone = null; return;
+    var fail = cameraDone; cameraDone = null;
+    if(fail) fail(null, 'Camera needs HTTPS or localhost');
+    return;
   }
-  cameraVideo = document.createElement('video');
-  cameraVideo.autoplay = true; cameraVideo.playsInline = true; cameraVideo.muted = true;
   invalidate();
-  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}, audio:false}).then(function(stream){
-    cameraStream = stream;
-    cameraVideo.srcObject = stream;
-    cameraTimer = setInterval(invalidate, 100);
-    invalidate();
-  }).catch(function(error){
-    var finish = cameraDone;
-    cameraDone = null; cameraVideo = null;
-    if(finish) finish(null, error && error.name === 'NotAllowedError' ?
-      'Camera permission denied' : 'Camera unavailable');
-    invalidate();
+  requestCamera(function(stream, error){
+    if(!cameraDone){
+      if(stream) stream.getTracks().forEach(function(track){ track.stop(); });
+      return;
+    }
+    if(!stream){
+      var finish = cameraDone; cameraDone = null;
+      if(finish) finish(null, cameraErrorMessage(error));
+      invalidate();
+      return;
+    }
+    attachCameraStream(stream);
   });
+}
+function cameraReady(){
+  return cameraVideo && cameraVideo.srcObject && (cameraVideo.readyState >= 2 || cameraVideo.videoWidth > 0);
 }
 function cameraRender(target, width, height){
   target.fillStyle = '#050708'; target.fillRect(0, 0, width, height);
-  if(!cameraVideo || cameraVideo.readyState < 2) {
-    target.fillStyle = '#e9eef7'; target.font = '16px monospace'; target.fillText('Waiting for camera...', 18, 70); return;
+  if(!cameraReady()) {
+    target.fillStyle = '#e9eef7'; target.font = '16px monospace';
+    target.fillText('Starting camera...', 18, 70);
+    target.font = '13px monospace';
+    target.fillText('Allow permission if asked', 18, 94);
+    return;
   }
-  var vw = cameraVideo.videoWidth, vh = cameraVideo.videoHeight;
+  var vw = cameraVideo.videoWidth || 640, vh = cameraVideo.videoHeight || 480;
   var scale = Math.max(width / vw, height / vh), dw = vw * scale, dh = vh * scale;
-  target.drawImage(cameraVideo, (width - dw) / 2, (height - dh) / 2, dw, dh);
+  try { target.drawImage(cameraVideo, (width - dw) / 2, (height - dh) / 2, dw, dh); }
+  catch(e) {}
   target.strokeStyle = '#4ad6c6'; target.lineWidth = 2;
   target.strokeRect(28, 48, width - 56, height - 88);
 }
 function cameraCapture(){
-  if(!cameraVideo || cameraVideo.readyState < 2 || !cameraDone) return;
+  if(!cameraReady() || !cameraDone) return false;
   var shot = document.createElement('canvas');
-  shot.width = cameraVideo.videoWidth; shot.height = cameraVideo.videoHeight;
-  shot.getContext('2d').drawImage(cameraVideo, 0, 0);
-  var done = cameraDone; cameraStop(); done(shot.toDataURL('image/jpeg', 0.88));
+  var vw = cameraVideo.videoWidth || 640, vh = cameraVideo.videoHeight || 480;
+  shot.width = vw; shot.height = vh;
+  shot.getContext('2d').drawImage(cameraVideo, 0, 0, vw, vh);
+  var done = cameraDone; cameraDone = null; cameraStop(); done(shot.toDataURL('image/jpeg', 0.88));
+  return true;
 }
 function cameraStop(){
   if(cameraTimer) clearInterval(cameraTimer);
   cameraTimer = null;
-  if(cameraStream) cameraStream.getTracks().forEach(function(track){ track.stop(); });
-  cameraStream = null; cameraVideo = null; cameraDone = null;
+  stopCameraTracks();
+  if(cameraVideo){
+    cameraVideo.onloadedmetadata = null;
+    cameraVideo.oncanplay = null;
+    try { cameraVideo.pause(); } catch(e) {}
+    cameraVideo.srcObject = null;
+  }
+  cameraDone = null;
 }
+
+var vkbEl = document.getElementById('vkb');
+var vkbKeys = document.getElementById('vkbKeys');
+var vkbOpen = false, vkbCaps = false, vkbNum = false, vkbSession = null;
+function vkbEmit(){
+  if(vkbSession && vkbSession.onChange) vkbSession.onChange(vkbSession.value);
+  invalidate();
+}
+function vkbType(ch){
+  if(!vkbSession) return;
+  vkbSession.value += ch;
+  vkbEmit();
+}
+function vkbBackspace(){
+  if(!vkbSession) return;
+  vkbSession.value = vkbSession.value.slice(0, -1);
+  vkbEmit();
+}
+function closeKeyboard(){
+  vkbOpen = false;
+  vkbEl.classList.remove('open');
+  vkbEl.setAttribute('aria-hidden', 'true');
+  vkbCaps = false;
+  vkbSession = null;
+}
+function finishKeyboard(){
+  var session = vkbSession;
+  var value = session ? session.value : '';
+  closeKeyboard();
+  if(session && session.onDone) session.onDone(value);
+}
+function toggleCalcEnglish(){
+  if(vkbOpen){ finishKeyboard(); return; }
+  openKeyboard({
+    value: MODES.calc.getText ? MODES.calc.getText() : '',
+    onChange: function(value){ if(MODES.calc.setText) MODES.calc.setText(value); },
+    onDone: function(value){ if(MODES.calc.setText) MODES.calc.setText(value); }
+  });
+}
+function paintVkb(){
+  vkbKeys.innerHTML = '';
+  var rows = vkbNum ? ['1234567890','-/:;()$&@','.,?!'] : ['qwertyuiop','asdfghjkl','zxcvbnm'];
+  rows.forEach(function(row, idx){
+    var el = document.createElement('div');
+    el.className = 'vkb-row';
+    if(!vkbNum && idx === 2){
+      var sh = document.createElement('button');
+      sh.type = 'button'; sh.className = 'wide' + (vkbCaps ? ' down' : '');
+      sh.textContent = vkbCaps ? 'ABC' : 'abc';
+      sh.dataset.act = 'caps';
+      el.appendChild(sh);
+    }
+    for(var i=0;i<row.length;i++){
+      var raw = row[i];
+      var ch = (!vkbNum && vkbCaps) ? raw.toUpperCase() : raw;
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = ch; b.dataset.ch = ch;
+      el.appendChild(b);
+    }
+    if(!vkbNum && idx === 2){
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'wide'; del.textContent = '⌫';
+      del.dataset.act = 'del';
+      el.appendChild(del);
+    }
+    vkbKeys.appendChild(el);
+  });
+  var bottom = document.createElement('div');
+  bottom.className = 'vkb-row';
+  var mode = document.createElement('button');
+  mode.type = 'button'; mode.className = 'wide';
+  mode.textContent = vkbNum ? 'ABC' : '123';
+  mode.dataset.act = 'num';
+  bottom.appendChild(mode);
+  if(vkbNum){
+    var del2 = document.createElement('button');
+    del2.type = 'button'; del2.className = 'wide'; del2.textContent = '⌫';
+    del2.dataset.act = 'del';
+    bottom.appendChild(del2);
+  }
+  var space = document.createElement('button');
+  space.type = 'button'; space.className = 'space'; space.textContent = 'space';
+  space.dataset.ch = ' ';
+  bottom.appendChild(space);
+  var done = document.createElement('button');
+  done.type = 'button'; done.className = 'wide accent'; done.textContent = 'Done';
+  done.dataset.act = 'done';
+  bottom.appendChild(done);
+  vkbKeys.appendChild(bottom);
+}
+function openKeyboard(opts){
+  vkbSession = {
+    value: String(opts && opts.value || ''),
+    onChange: opts && opts.onChange,
+    onDone: opts && opts.onDone
+  };
+  vkbOpen = true;
+  vkbCaps = false;
+  vkbNum = false;
+  vkbEl.classList.add('open');
+  vkbEl.setAttribute('aria-hidden', 'false');
+  paintVkb();
+  vkbEmit();
+}
+vkbKeys.addEventListener('pointerdown', function(e){
+  var b = e.target.closest('button');
+  if(!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var act = b.dataset.act;
+  if(act === 'caps'){ vkbCaps = !vkbCaps; paintVkb(); return; }
+  if(act === 'num'){ vkbNum = !vkbNum; paintVkb(); return; }
+  if(act === 'del') return vkbBackspace();
+  if(act === 'done') return finishKeyboard();
+  if(b.dataset.ch != null) vkbType(b.dataset.ch);
+});
+vkbEl.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+
 function runOCR(dataUrl, done){
   loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', function(err){
     if(err) return done('', err.message);
@@ -1326,7 +1584,7 @@ var OS_API = {
   signal: signal,
   now: function(){ return new Date(); },
   web: { cameraStart: cameraStart, cameraRender: cameraRender, cameraCapture: cameraCapture,
-    cameraStop: cameraStop, ocr: runOCR, ask: askAI },
+    cameraStop: cameraStop, ocr: runOCR, ask: askAI, openKeyboard: openKeyboard, closeKeyboard: closeKeyboard },
   exit: function(){ stopOS(); }
 };
 
@@ -1356,6 +1614,7 @@ function startOS(){
 }
 function stopOS(){
   cameraStop();
+  closeKeyboard();
   if(guestOS && guestOS.shutdown){ try{ guestOS.shutdown(); }catch(e){} }
   osActive = false;
   canvas.classList.remove('lit');
@@ -1385,6 +1644,12 @@ function emit(ev){
     if(ev.key==='shift'){ shiftOn = !shiftOn; invalidate(); }
     else if(ev.key==='alpha'){ alphaOn = !alphaOn; }
     else if(ev.key==='hyp'){ hypOn = !hypOn; invalidate(); }
+    if((ev.key === 'shift' || ev.key === 'alpha') &&
+       (shiftOn || !!pressStart.shift) && (alphaOn || !!pressStart.alpha)){
+      ev.shift = true;
+      ev.alpha = true;
+      ev.combo = 'shift-alpha';
+    }
   }
 
   for(var i=0;i<listeners.length;i++){
@@ -1428,7 +1693,9 @@ function keyUp(key){
   if(!t0) return;
   delete pressStart[key];
   var dur = Date.now()-t0;
-  var base = {key:key, shift:shiftOn, alpha:alphaOn, hyp:hypOn, duration:dur, time:Date.now()};
+  var shiftHeld = shiftOn || !!pressStart.shift || key === 'shift';
+  var alphaHeld = alphaOn || !!pressStart.alpha || key === 'alpha';
+  var base = {key:key, shift:shiftHeld, alpha:alphaHeld, hyp:hypOn, duration:dur, time:Date.now()};
   emit(Object.assign({type:'keyup'}, base));
   if(key==='mode'){ morseUp(dur); return; }
   emit(Object.assign({type:'press'}, base));
@@ -1479,28 +1746,29 @@ function morseUp(dur){
    INPUT: pointer + physical keyboard
    ===================================================================== */
 var frame = document.getElementById('frame');
-var activePointerKey = null;
+var pointerKeys = {};
 
 frame.addEventListener('pointerdown', function(e){
   var b = e.target.closest('.btn');
   if(!b) return;
   e.preventDefault();
-  activePointerKey = b.dataset.key;
+  pointerKeys[e.pointerId] = b.dataset.key;
   b.classList.add('down');
   keyDown(b.dataset.key);
   try { if(b.setPointerCapture) b.setPointerCapture(e.pointerId); } catch(err) {}
 });
 function release(e){
-  if(!activePointerKey) return;
-  var key = activePointerKey;
-  activePointerKey = null;
+  var key = pointerKeys[e.pointerId];
+  if(!key) return;
+  delete pointerKeys[e.pointerId];
+  var still = false;
+  Object.keys(pointerKeys).forEach(function(id){ if(pointerKeys[id] === key) still = true; });
   var b = frame.querySelector('.btn[data-key="'+key+'"]');
-  if(b) b.classList.remove('down');
+  if(b && !still) b.classList.remove('down');
   keyUp(key);
 }
 frame.addEventListener('pointerup', release);
 frame.addEventListener('pointercancel', release);
-frame.addEventListener('lostpointercapture', release);
 document.addEventListener('pointerup', release);
 document.addEventListener('pointercancel', release);
 frame.addEventListener('contextmenu', function(e){ e.preventDefault(); });
@@ -1511,9 +1779,21 @@ var KB = {
   '(':'lparen', ')':'rparen', ',':'comma',
   'Enter':'exe', 'Backspace':'del', 'Escape':'ac', 'Delete':'ac',
   'ArrowUp':'up', 'ArrowDown':'down', 'ArrowLeft':'left', 'ArrowRight':'right',
-  'm':'mode', 's':'shift', 'a':'alpha', 'h':'hyp'
+  'm':'mode', 's':'shift', 'Shift':'shift', 'a':'alpha', 'Alpha':'alpha', 'h':'hyp'
 };
 document.addEventListener('keydown', function(e){
+  if(document.getElementById('settingsBackdrop').classList.contains('open')) return;
+  if(vkbOpen){
+    if(e.key === 'Enter'){ e.preventDefault(); finishKeyboard(); return; }
+    if(e.key === 'Backspace'){ e.preventDefault(); vkbBackspace(); return; }
+    if(e.key === 'Escape'){ e.preventDefault(); finishKeyboard(); return; }
+    if(e.key === ' '){ e.preventDefault(); vkbType(' '); return; }
+    if(e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey){
+      e.preventDefault();
+      vkbType(vkbCaps ? e.key.toUpperCase() : e.key);
+      return;
+    }
+  }
   var k = KB[e.key];
   if(!k) return;
   e.preventDefault();
@@ -1522,6 +1802,8 @@ document.addEventListener('keydown', function(e){
   if(b) b.classList.add('down');
 });
 document.addEventListener('keyup', function(e){
+  if(document.getElementById('settingsBackdrop').classList.contains('open')) return;
+  if(vkbOpen) return;
   var k = KB[e.key];
   if(!k) return;
   e.preventDefault();
@@ -1547,8 +1829,11 @@ document.getElementById('dlHtml').addEventListener('click', function(ev){
 });
 document.getElementById('dlOs').addEventListener('click', function(ev){
   ev.preventDefault();
-  var src = document.getElementById('os-inline').textContent;
-  download('os.js', src, 'text/javascript');
+  fetch('os.js').then(function(res){ return res.ok ? res.text() : Promise.reject(); }).then(function(src){
+    download('os.js', src, 'text/javascript');
+  }).catch(function(){
+    download('os.js', document.getElementById('os-inline').textContent, 'text/javascript');
+  });
 });
 
 /* =====================================================================

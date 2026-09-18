@@ -31,7 +31,7 @@
 (function () {
   'use strict';
 
-  var OS = { name: 'CasioOS', version: '0.3' };
+  var OS = { name: 'CasioOS', version: '0.4' };
 
   var api = null, SC = null, W = 0, H = 0, COL = null;
 
@@ -97,14 +97,33 @@
   }
   function wrapText(ctx, str, maxW, size) {
     font(ctx, size);
-    var words = String(str).split(' '), lines = [], line = '';
-    for (var i = 0; i < words.length; i++) {
-      var test = line ? line + ' ' + words[i] : words[i];
-      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = words[i]; }
-      else line = test;
+    var lines = [], paras = String(str).replace(/\r/g, '').split('\n');
+    function pushWord(line, word) {
+      while (word && ctx.measureText(word).width > maxW) {
+        var cut = word.length;
+        while (cut > 1 && ctx.measureText(word.slice(0, cut)).width > maxW) cut--;
+        var piece = word.slice(0, cut);
+        word = word.slice(cut);
+        if (line) { lines.push(line); line = ''; }
+        if (ctx.measureText(piece).width > maxW) { lines.push(piece); }
+        else line = piece;
+      }
+      if (!word) return line;
+      var test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); return word; }
+      return test;
     }
-    if (line) lines.push(line);
-    return lines;
+    for (var p = 0; p < paras.length; p++) {
+      var words = paras[p].length ? paras[p].split(' ') : [''];
+      var line = '';
+      for (var i = 0; i < words.length; i++) line = pushWord(line, words[i]);
+      lines.push(line);
+    }
+    return lines.length ? lines : [''];
+  }
+  function isShiftAlpha(e) {
+    return e.combo === 'shift-alpha' ||
+      (e.key === 'alpha' && e.shift) || (e.key === 'shift' && e.alpha);
   }
 
   /* ---------------------------------------------------------------
@@ -652,35 +671,70 @@
     enter: function () {
       this.prompt = '';
       this.answer = '';
-      this.status = 'Shift + Alpha = English input';
+      this.status = 'Shift+Alpha = English keyboard';
       this.busy = false;
       this.inputMode = false;
       this.inputText = '';
       this.inputKey = '';
       this.inputIndex = 0;
       this.cameraMode = false;
+      this.answerScroll = 0;
+      this.keyboardRows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+      this.keyboardRow = 0;
+      this.keyboardCol = 0;
+      this.keyboardCaps = false;
+    },
+    leave: function () {
+      this.closeCamera();
+    },
+    closeKeyboard: function () {
+      this.inputMode = false;
+      this.inputKey = '';
+    },
+    openEnglish: function () {
+      if (this.inputMode) {
+        this.closeKeyboard();
+        this.status = 'EXE = ask AI    Shift+Alpha = edit';
+        return api.invalidate();
+      }
+      this.inputMode = true;
+      this.inputText = this.prompt || '';
+      this.inputKey = '';
+      this.inputIndex = 0;
+      this.keyboardRow = 0;
+      this.keyboardCol = 0;
+      this.keyboardCaps = false;
+      this.status = 'Arrows move   EXE select   AC done';
+      api.invalidate();
     },
     key: function (e) {
       if (e.type !== 'press') return;
       if (this.cameraMode) {
-        if (e.key === 'exe') return api.web.cameraCapture();
+        if (e.key === 'exe') {
+          if (!api.web.cameraCapture()) {
+            this.status = 'Camera is starting...';
+            api.invalidate();
+          }
+          return;
+        }
         if (e.key === 'ac') return this.closeCamera();
         return;
       }
+      if (isShiftAlpha(e)) return this.openEnglish();
+      if (this.inputMode) return this.keyInput(e.key);
       if (e.key === 'ac') return OS.goHome();
-      if (e.key === 'alpha' && e.shift) {
-        this.inputMode = true;
-        this.inputText = this.prompt;
-        this.inputKey = '';
-        this.inputIndex = 0;
-        this.status = '2-9 = letters   EXE = accept';
+      if (e.key === 'exe') return this.ask();
+      if (e.key === 'up') {
+        this.answerScroll = Math.max(0, (this.answerScroll || 0) - 1);
         return api.invalidate();
       }
-      if (this.inputMode) return this.keyInput(e.key);
-      if (e.key === 'exe') return this.ask();
+      if (e.key === 'down') {
+        this.answerScroll = (this.answerScroll || 0) + 1;
+        return api.invalidate();
+      }
       if (e.key === 'left') {
         this.cameraMode = true;
-        this.status = 'Camera preview   EXE = capture';
+        this.status = 'Allow camera, then EXE = capture';
         api.web.cameraStart(this.receiveImage.bind(this));
         return api.invalidate();
       }
@@ -690,31 +744,36 @@
       api.invalidate();
     },
     keyInput: function (k) {
-      var groups = { '2': 'abc', '3': 'def', '4': 'ghi', '5': 'jkl',
-        '6': 'mno', '7': 'pqrs', '8': 'tuv', '9': 'wxyz' };
-      if (groups[k]) {
-        if (this.inputKey === k) this.inputIndex = (this.inputIndex + 1) % groups[k].length;
-        else { this.inputKey = k; this.inputIndex = 0; }
+      var row = this.keyboardRows[this.keyboardRow];
+      if (k === 'left') this.keyboardCol = (this.keyboardCol + row.length - 1) % row.length;
+      else if (k === 'right') this.keyboardCol = (this.keyboardCol + 1) % row.length;
+      else if (k === 'up') {
+        this.keyboardRow = (this.keyboardRow + this.keyboardRows.length - 1) % this.keyboardRows.length;
+        this.keyboardCol = Math.min(this.keyboardCol, this.keyboardRows[this.keyboardRow].length - 1);
+      } else if (k === 'down') {
+        this.keyboardRow = (this.keyboardRow + 1) % this.keyboardRows.length;
+        this.keyboardCol = Math.min(this.keyboardCol, this.keyboardRows[this.keyboardRow].length - 1);
       } else if (k === 'exe') {
-        if (this.inputKey) this.inputText += groups[this.inputKey][this.inputIndex];
-        this.inputKey = '';
+        this.inputText += this.keyboardCaps ? row[this.keyboardCol].toUpperCase() : row[this.keyboardCol];
       } else if (k === 'dot') {
-        if (this.inputKey) this.inputText += groups[this.inputKey][this.inputIndex];
-        this.inputText += ' '; this.inputKey = '';
+        this.inputText += ' ';
       } else if (k === 'del') {
-        if (this.inputKey) this.inputKey = '';
-        else this.inputText = this.inputText.slice(0, -1);
+        this.inputText = this.inputText.slice(0, -1);
+      } else if (k === 'shift') {
+        this.keyboardCaps = !this.keyboardCaps;
       } else if (k === 'ac') {
-        this.inputMode = false; this.inputKey = '';
+        this.closeKeyboard();
+        this.status = 'Shift+Alpha = English keyboard';
+        return api.invalidate();
       }
-      this.prompt = this.inputText + (this.inputKey ? groups[this.inputKey][this.inputIndex] : '');
-      this.status = '2-9 letters   dot=space   EXE=accept';
+      this.prompt = this.inputText;
+      this.status = 'Arrows move   EXE select   AC done';
       api.invalidate();
     },
     closeCamera: function () {
       this.cameraMode = false;
-      api.web.cameraStop();
-      this.status = 'EXE = ask AI    Shift + Alpha = edit';
+      if (api.web && api.web.cameraStop) api.web.cameraStop();
+      this.status = 'EXE = ask AI    Shift+Alpha = edit';
       api.invalidate();
     },
     receiveImage: function (dataUrl, error) {
@@ -722,20 +781,20 @@
       if (error) {
         this.cameraMode = false;
         this.status = error;
-        api.web.cameraStop();
+        if (api.web && api.web.cameraStop) api.web.cameraStop();
         api.invalidate();
         return;
       }
       this.busy = true;
       this.cameraMode = false;
-      api.web.cameraStop();
+      if (api.web && api.web.cameraStop) api.web.cameraStop();
       this.status = 'Reading camera image...';
       api.invalidate();
-      api.web.ocr(dataUrl, function (textValue, error) {
+      api.web.ocr(dataUrl, function (textValue, err) {
         self.busy = false;
-        if (error) self.status = error;
+        if (err) self.status = err;
         else {
-          self.prompt = textValue.trim().slice(0, 180);
+          self.prompt = String(textValue || '').trim().slice(0, 500);
           self.status = 'OCR complete - EXE = ask AI';
         }
         api.invalidate();
@@ -744,41 +803,99 @@
     ask: function () {
       var self = this;
       if (!this.prompt.trim() || this.busy) return;
+      this.closeKeyboard();
       this.busy = true;
       this.status = 'Thinking...';
+      this.answerScroll = 0;
       api.invalidate();
       api.web.ask(this.prompt, function (answer, error) {
         self.busy = false;
         self.answer = answer || '';
-        self.status = error || 'Shift + Alpha = edit question';
+        self.answerScroll = 0;
+        self.status = error || 'Up/Down scroll   Shift+Alpha edit';
         api.invalidate();
       });
     },
     render: function (ctx) {
       if (this.cameraMode) {
         api.web.cameraRender(ctx, W, H);
-        text(ctx, 'Camera', 12, BAR_H + 6, 17, T.accent2, 'bold');
-        text(ctx, 'EXE capture   AC back', 12, H - 18, 12, T.text);
+        ctx.fillStyle = 'rgba(14,21,38,0.72)';
+        ctx.fillRect(0, 0, W, BAR_H + 4);
+        ctx.fillRect(0, H - 28, W, 28);
+        text(ctx, 'Camera', 12, 6, 16, T.accent2, 'bold');
+        text(ctx, 'EXE capture   AC back', 12, H - 20, 12, T.text);
         return;
       }
-      text(ctx, 'AI', 12, BAR_H + 6, 17, T.accent2, 'bold');
-      text(ctx, 'maths  chem  phy  ICT', 48, BAR_H + 8, 12, T.dim);
-      ctx.fillStyle = T.panel;
-      roundRect(ctx, 10, BAR_H + 30, W - 20, 62, 6); ctx.fill();
-      var question = wrapText(ctx, this.prompt || 'Shift + Alpha for English input', W - 38, 14);
-      for (var i = 0; i < Math.min(2, question.length); i++) {
-        text(ctx, question[i], 19, BAR_H + 40 + i * 18, 14, this.prompt ? T.text : T.faint);
-      }
-      text(ctx, this.status, 12, BAR_H + 101, 12, this.busy ? T.warn : T.faint);
-      if (this.answer) {
-        ctx.fillStyle = 'rgba(126,231,168,0.14)';
-        roundRect(ctx, 10, BAR_H + 122, W - 20, H - BAR_H - 160, 6); ctx.fill();
-        var answerLines = wrapText(ctx, this.answer, W - 38, 13);
-        for (var j = 0; j < Math.min(6, answerLines.length); j++) {
-          text(ctx, answerLines[j], 19, BAR_H + 132 + j * 17, 13, T.answer);
+      if (this.inputMode) {
+        text(ctx, 'English input', 12, BAR_H + 5, 16, T.accent2, 'bold');
+        var inputLines = wrapText(ctx, this.inputText || ' ', W - 28, 14);
+        text(ctx, inputLines[inputLines.length - 1], 12, BAR_H + 28, 14, T.text);
+        var keyTop = BAR_H + 55, keyH = 32, gap = 5;
+        for (var r = 0; r < this.keyboardRows.length; r++) {
+          var keys = this.keyboardRows[r], keyW = 42;
+          var keyX = (W - keys.length * keyW - (keys.length - 1) * gap) / 2;
+          for (var c = 0; c < keys.length; c++) {
+            var selected = r === this.keyboardRow && c === this.keyboardCol;
+            ctx.fillStyle = selected ? T.accent : T.panelHi;
+            roundRect(ctx, keyX + c * (keyW + gap), keyTop + r * (keyH + gap), keyW, keyH, 5); ctx.fill();
+            text(ctx, this.keyboardCaps ? keys[c].toUpperCase() : keys[c],
+              keyX + c * (keyW + gap) + keyW / 2, keyTop + r * (keyH + gap) + 8,
+              15, selected ? T.bg0 : T.text, 'bold', 'center');
+          }
         }
+        text(ctx, 'Arrows move   EXE select   . space   SHIFT caps   AC done',
+          12, H - 18, 11, T.faint);
+        return;
       }
-      text(ctx, '\u2190 camera OCR    EXE ask    AC home', 12, H - 18, 12, T.faint);
+      var y = BAR_H + 8;
+      text(ctx, 'AI Tutor', 12, y, 18, T.accent2, 'bold');
+      text(ctx, this.busy ? 'working' : (this.inputMode ? 'typing' : 'ready'),
+        W - 14, y + 3, 12, this.busy ? T.warn : T.dim, '', 'right');
+      y += 26;
+      ctx.fillStyle = this.inputMode ? T.panelHi : T.panel;
+      roundRect(ctx, 10, y, W - 20, 58, 8); ctx.fill();
+      ctx.strokeStyle = this.inputMode ? T.accent2 : T.line;
+      ctx.lineWidth = this.inputMode ? 1.6 : 1;
+      roundRect(ctx, 10, y, W - 20, 58, 8); ctx.stroke();
+      var qLines = wrapText(ctx, this.prompt || 'Shift+Alpha opens English keyboard', W - 40, 13);
+      var qShow = Math.min(3, qLines.length);
+      var qStart = Math.max(0, qLines.length - qShow);
+      for (var i = 0; i < qShow; i++) {
+        text(ctx, qLines[qStart + i], 18, y + 8 + i * 16, 13, this.prompt ? T.text : T.faint);
+      }
+      y += 66;
+      text(ctx, this.status, 12, y, 12, this.busy ? T.warn : T.dim);
+      y += 18;
+      var footer = 22;
+      var boxH = H - y - footer - 4;
+      ctx.fillStyle = 'rgba(126,231,168,0.12)';
+      roundRect(ctx, 10, y, W - 20, boxH, 8); ctx.fill();
+      var answerLines = wrapText(ctx, this.answer || 'Answer appears here. Use Up / Down to scroll.', W - 40, 13);
+      var lineH = 16;
+      var visible = Math.max(1, Math.floor((boxH - 16) / lineH));
+      var maxScroll = Math.max(0, answerLines.length - visible);
+      this.answerScroll = Math.max(0, Math.min(this.answerScroll || 0, maxScroll));
+      var start = this.answerScroll;
+      ctx.save();
+      ctx.beginPath();
+      roundRect(ctx, 10, y, W - 20, boxH, 8);
+      ctx.clip();
+      for (var j = 0; j < visible; j++) {
+        var line = answerLines[start + j];
+        if (line === undefined) break;
+        text(ctx, line, 18, y + 8 + j * lineH, 13, this.answer ? T.answer : T.faint);
+      }
+      ctx.restore();
+      if (maxScroll > 0) {
+        var trackH = boxH - 16, thumbH = Math.max(12, trackH * visible / answerLines.length);
+        var thumbY = y + 8 + (trackH - thumbH) * (start / maxScroll);
+        ctx.fillStyle = T.line;
+        roundRect(ctx, W - 18, y + 8, 3, trackH, 1.5); ctx.fill();
+        ctx.fillStyle = T.accent;
+        roundRect(ctx, W - 18, thumbY, 3, thumbH, 1.5); ctx.fill();
+      }
+      var scrollLabel = maxScroll > 0 ? ('scroll ' + (start + 1) + '/' + (maxScroll + 1)) : 'answer';
+      text(ctx, '\u2191\u2193 ' + scrollLabel + '   \u2190 camera   EXE ask   AC home', 12, H - 18, 11, T.faint);
     }
   };
 
@@ -822,6 +939,7 @@
      OS lifecycle
      --------------------------------------------------------------- */
   OS.goHome = function () {
+    if (activeApp && activeApp.leave) activeApp.leave();
     view = 'home';
     activeApp = null;
     api.invalidate();
@@ -839,7 +957,9 @@
   OS.shutdown = function () {
     if (clockTimer) clearInterval(clockTimer);
     clockTimer = null;
+    if (activeApp && activeApp.leave) activeApp.leave();
     activeApp = null;
+    if (api && api.web && api.web.closeKeyboard) api.web.closeKeyboard();
   };
 
   OS.onKey = function (e) {
