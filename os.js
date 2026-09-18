@@ -794,8 +794,19 @@
         self.busy = false;
         if (err) self.status = err;
         else {
-          self.prompt = String(textValue || '').trim().slice(0, 500);
-          self.status = 'OCR complete - EXE = ask AI';
+          var recognized = String(textValue || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+          self.inputText = recognized;
+          self.prompt = recognized;
+          self.answer = '';
+          if (recognized) {
+            self.inputMode = true;
+            self.keyboardRow = 0;
+            self.keyboardCol = 0;
+            self.status = 'OCR text loaded   Arrows edit   AC done';
+          } else {
+            self.inputMode = false;
+            self.status = 'No text found - try a clearer image';
+          }
         }
         api.invalidate();
       });
