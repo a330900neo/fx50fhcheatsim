@@ -1223,13 +1223,17 @@ function cameraStart(done){
   }
   cameraVideo = document.createElement('video');
   cameraVideo.autoplay = true; cameraVideo.playsInline = true; cameraVideo.muted = true;
+  invalidate();
   navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}, audio:false}).then(function(stream){
     cameraStream = stream;
     cameraVideo.srcObject = stream;
     cameraTimer = setInterval(invalidate, 100);
     invalidate();
   }).catch(function(error){
-    cameraDone(null, 'Camera permission denied'); cameraDone = null; cameraVideo = null;
+    var finish = cameraDone;
+    cameraDone = null; cameraVideo = null;
+    if(finish) finish(null, error && error.name === 'NotAllowedError' ?
+      'Camera permission denied' : 'Camera unavailable');
     invalidate();
   });
 }
@@ -1276,7 +1280,7 @@ function askAI(prompt, done){
       {role:'system', content:system}, {role:'user', content:prompt}
     ]};
   } else {
-    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(key);
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' + encodeURIComponent(key);
     delete headers.Authorization;
     body = { systemInstruction:{parts:[{text:system}]}, contents:[{parts:[{text:prompt}]}] };
   }
@@ -1475,23 +1479,30 @@ function morseUp(dur){
    INPUT: pointer + physical keyboard
    ===================================================================== */
 var frame = document.getElementById('frame');
+var activePointerKey = null;
 
 frame.addEventListener('pointerdown', function(e){
   var b = e.target.closest('.btn');
   if(!b) return;
   e.preventDefault();
-  b.setPointerCapture && b.setPointerCapture(e.pointerId);
+  activePointerKey = b.dataset.key;
   b.classList.add('down');
   keyDown(b.dataset.key);
+  try { if(b.setPointerCapture) b.setPointerCapture(e.pointerId); } catch(err) {}
 });
 function release(e){
-  var b = e.target.closest ? e.target.closest('.btn') : null;
-  if(!b) return;
-  b.classList.remove('down');
-  keyUp(b.dataset.key);
+  if(!activePointerKey) return;
+  var key = activePointerKey;
+  activePointerKey = null;
+  var b = frame.querySelector('.btn[data-key="'+key+'"]');
+  if(b) b.classList.remove('down');
+  keyUp(key);
 }
 frame.addEventListener('pointerup', release);
 frame.addEventListener('pointercancel', release);
+frame.addEventListener('lostpointercapture', release);
+document.addEventListener('pointerup', release);
+document.addEventListener('pointercancel', release);
 frame.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
 var KB = {
